@@ -1,0 +1,53 @@
+@import url('https://launcher-site-nu.vercel.app/design-tokens.css');
+@import "tailwindcss";
+
+/* Media accent: violet, distinct from the other apps. */
+:root { --accent: #8E6FE0; --accent-soft: rgba(142,111,224,0.14); }
+:root[data-theme="light"] { --accent-soft: rgba(142,111,224,0.12); }
+/* Map semantic tokens → Tailwind 4 utilities (bg-surface, text-primary,
+ * border-border, rounded-card, …) so app code consumes tokens through familiar
+ * classnames and flips automatically between light and dark. Raw hex or ad-hoc
+ * `rounded-xl` in components is a bug — reference tokens instead. */
+@theme {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-hover: var(--surface-hover);
+  --color-surface-raised: var(--surface-raised);
+  --color-panel: var(--panel-bg);
+  --color-border: var(--border);
+  --color-border-hover: var(--border-hover);
+  --color-border-strong: var(--border-strong);
+  --color-input-bg: var(--input-bg);
+  --color-hover-subtle: var(--hover-subtle);
+  --color-primary: var(--text-primary);
+  --color-secondary: var(--text-secondary);
+  --color-muted: var(--text-muted);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-success: var(--success);
+  --color-warn: var(--warn);
+  --color-danger: var(--danger);
+
+  --radius-card: var(--radius-lg);
+  --radius-pill: var(--radius-pill);
+
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+}
+
+body { background: var(--bg); color: var(--text-primary); font-family: var(--font-sans); }
+
+/* Shared form control — token-based, themes automatically. */
+.input {
+  width: 100%;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 9px 12px;
+  font: var(--text-sm) var(--font-sans);
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.15s;
+}
+.input:focus { border-color: var(--accent); }
+.input::placeholder { color: var(--text-muted); }
