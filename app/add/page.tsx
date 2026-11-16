@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/firebase/session";
 import { hasTmdbKey } from "@/lib/lookup/catalog";
@@ -13,6 +14,9 @@ export default async function AddPage() {
       <h1 className="mb-1 text-2xl font-semibold">Add a title</h1>
       <p className="mb-6 text-sm text-secondary">Search, pick the right one, and the poster, year and details fill in.</p>
       <AddClient moviesSearchable={hasTmdbKey()} />
+      <p className="mt-8 text-sm text-secondary">
+        Moving a whole list over? <Link href="/import" className="text-accent hover:underline">Import a list</Link>
+      </p>
     </main>
   );
 }

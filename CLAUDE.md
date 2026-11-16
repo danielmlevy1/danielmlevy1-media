@@ -62,6 +62,15 @@ details, which is what gets signed), `update_item`, `set_progress`,
 (add ↔ archive, archive ↔ restore, updates put back `before`). Summaries come
 from `propose`, never the model. A new write tool needs an `undo` (tested).
 
+## Bulk import (`/import`, `lib/media/import.ts`)
+Paste or open a JSON list (`{items:[{type,title,year?,creator?,status?,rating?,
+finishedAt?,tags?,whereToWatch?,notes?,recommendedBy?}]}`). Preview looks up each
+row server-side (`pickMatch`: year within ±1, exact title first) and flags
+duplicates; nothing saves until Import. Commit re-fetches the chosen match by
+ref (never trusts client catalog data) and saves through `createItemRecord`.
+Chunks of 12 per server call. New items may carry explicit
+`startedAt`/`finishedAt` (imports know when); otherwise status stamps today.
+
 ## Tests
 `npm test` (vitest). Write rules, catalog parsers (recorded responses, no
 network), normalizer, and the tools end to end against an in-memory store
