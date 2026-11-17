@@ -62,6 +62,9 @@ export interface NewItemInput {
   recommendedBy?: string | null;
   whereToWatch?: string | null;
   tags?: string[];
+  /** YYYY-MM-DD. Only for imports that already know when; otherwise stamped by status. */
+  startedAt?: string | null;
+  finishedAt?: string | null;
 }
 
 /** Fields a user (or the assistant) may change on an existing item. null clears. */
@@ -200,6 +203,10 @@ export function planNewItem(input: NewItemInput, existing: MediaItem[], ctx: { i
   if (!MEDIA_STATUSES.includes(status)) errors.push("Unknown status.");
   const progress = cleanProgress(input.progress);
   errors.push(...progressErrors(input.type, progress), ...ratingErrors(input.rating));
+  for (const k of ["startedAt", "finishedAt"] as const) {
+    const v = input[k];
+    if (v != null && !DATE.test(v)) errors.push(`${k} must be YYYY-MM-DD.`);
+  }
   if (errors.length) return { ok: false, errors };
 
   const dup = findDuplicate(existing, { type: input.type, title: title!, year: input.year, externalIds: input.externalIds });
@@ -225,8 +232,8 @@ export function planNewItem(input: NewItemInput, existing: MediaItem[], ctx: { i
     recommendedBy: clean(input.recommendedBy),
     whereToWatch: clean(input.whereToWatch),
     tags: cleanTags(input.tags),
-    startedAt: null,
-    finishedAt: null,
+    startedAt: input.startedAt ?? null,
+    finishedAt: input.finishedAt ?? null,
     createdAt: ctx.now,
     updatedAt: ctx.now,
     archivedAt: null,
