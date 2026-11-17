@@ -71,6 +71,14 @@ ref (never trusts client catalog data) and saves through `createItemRecord`.
 Chunks of 12 per server call. New items may carry explicit
 `startedAt`/`finishedAt` (imports know when); otherwise status stamps today.
 
+## Find covers (`/match`)
+Items with no catalog id (typed by hand, or imported while a catalog was down)
+get a "Find covers" link on the list. Preview searches (books: title + author,
+then title; author surname must match), then `attachCatalogRecord` fills
+poster, ids and EMPTY catalog fields only: title, typed author and list state
+are kept; refused if another live item has that catalog id. Open Library is
+slow from Vercel: `getJson` gives openlibrary.org 15s and one retry.
+
 ## Tests
 `npm test` (vitest). Write rules, catalog parsers (recorded responses, no
 network), normalizer, and the tools end to end against an in-memory store

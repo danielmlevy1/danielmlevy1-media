@@ -176,6 +176,11 @@ export function titleKey(title: string): string {
     .trim();
 }
 
+/** True when two items carry the same TMDB / TVmaze / IMDb / Open Library id. */
+export function sharesCatalogId(e: ExternalIds, ids: ExternalIds): boolean {
+  return !!((ids.tmdb && e.tmdb === ids.tmdb) || (ids.tvmaze && e.tvmaze === ids.tvmaze) || (ids.imdb && e.imdb === ids.imdb) || (ids.openLibrary && e.openLibrary === ids.openLibrary));
+}
+
 /** The live item a candidate would duplicate, if any. */
 export function findDuplicate(
   items: MediaItem[],
@@ -184,8 +189,7 @@ export function findDuplicate(
   const ids = c.externalIds ?? {};
   for (const i of items) {
     if (i.archivedAt || i.type !== c.type) continue;
-    const e = i.externalIds;
-    if ((ids.tmdb && e.tmdb === ids.tmdb) || (ids.tvmaze && e.tvmaze === ids.tvmaze) || (ids.imdb && e.imdb === ids.imdb) || (ids.openLibrary && e.openLibrary === ids.openLibrary)) return i;
+    if (sharesCatalogId(i.externalIds, ids)) return i;
     if (titleKey(i.title) === titleKey(c.title) && (!c.year || !i.year || i.year === c.year)) return i;
   }
   return null;
@@ -300,6 +304,41 @@ export function planChanges(item: MediaItem, changes: ItemChanges, today: string
   return { ok: true, patch, before };
 }
 
+/** Catalog facts to attach to an item that was added by hand (no catalog id). */
+export interface CatalogFacts {
+  year: number | null;
+  creator: string | null;
+  overview: string | null;
+  posterUrl: string | null;
+  genres: string[];
+  runtimeMinutes: number | null;
+  pageCount: number | null;
+  seasonCount: number | null;
+  externalIds: ExternalIds;
+}
+
+/**
+ * Fill an item's catalog fields from a match. The title, list state and any
+ * creator the user typed are kept; empty catalog fields are filled; ids and
+ * poster are set. Refused when another live item already has that catalog id.
+ */
+export function planCatalogMatch(item: MediaItem, facts: CatalogFacts, others: MediaItem[]):
+  | { ok: true; patch: Partial<MediaItem> }
+  | { ok: false; errors: string[] } {
+  const dup = others.find((o) => o.id !== item.id && !o.archivedAt && o.type === item.type && sharesCatalogId(o.externalIds, facts.externalIds));
+  if (dup) return { ok: false, errors: [`That match is already on your list as “${dup.title}”.`] };
+  const patch: Partial<MediaItem> = { externalIds: { ...item.externalIds, ...facts.externalIds } };
+  if (facts.posterUrl) patch.posterUrl = facts.posterUrl;
+  if (item.year === null && facts.year !== null) patch.year = facts.year;
+  if (!item.creator && facts.creator) patch.creator = facts.creator;
+  if (!item.overview && facts.overview) patch.overview = facts.overview;
+  if (!item.genres.length && facts.genres.length) patch.genres = facts.genres;
+  for (const k of ["runtimeMinutes", "pageCount", "seasonCount"] as const) {
+    if (item[k] === null && facts[k] !== null) patch[k] = facts[k];
+  }
+  return { ok: true, patch };
+}
+
 // -----------------------------------------------------------------------------
 // Firestore writes
 // -----------------------------------------------------------------------------
@@ -324,6 +363,17 @@ export async function updateItemRecord(uid: string, id: string, changes: ItemCha
     await itemsCol(uid).doc(id).update({ ...plan.patch, updatedAt: now.toISOString() });
   }
   return { ok: true, id, patch: plan.patch, before: plan.before };
+}
+
+export async function attachCatalogRecord(uid: string, id: string, facts: CatalogFacts):
+  Promise<{ ok: true; id: string } | { ok: false; errors: string[] }> {
+  const items = await getItems(uid);
+  const item = items.find((i) => i.id === id);
+  if (!item) return { ok: false, errors: ["That item doesn't exist (or is in the trash)."] };
+  const plan = planCatalogMatch(item, facts, items);
+  if (!plan.ok) return plan;
+  await itemsCol(uid).doc(id).update({ ...plan.patch, updatedAt: new Date().toISOString() });
+  return { ok: true, id };
 }
 
 export async function archiveItemRecord(uid: string, id: string): Promise<Result> {
