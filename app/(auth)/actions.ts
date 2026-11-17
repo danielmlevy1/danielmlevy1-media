@@ -19,5 +19,5 @@ import { clearSession } from "@/lib/firebase/session";
 export async function signOut() {
   await clearSession();
   revalidatePath("/", "layout");
-  redirect("/sign-in");
+  redirect("/sign-in?signedout=1");
 }
