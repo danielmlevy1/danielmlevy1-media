@@ -78,6 +78,21 @@ server, stripped immediately on arrival). Your app catches it on load:
 - **Travel:** `AuthHandoff` exchanges the token via the proxy's `/api/custom-token`, then
   `signInWithCustomToken` client-side.
 
+**One sign-in (2026-11):** the tile handoff alone left gaps (bookmarks, direct links, the side bar
+inside an app, expired 5-day cookies all showed a second sign-in). Every app is same-origin on
+`www.daniellevy.app` and uses the same Firebase project, so the launcher's Firebase sign-in is already
+stored in the browser (IndexedDB, default app). `AuthHandoff` now also uses it:
+- **Cookie apps** (Recipes, Tax, Insurance, Holdings, Media — identical `app/_components/auth-handoff.tsx`,
+  keep them in sync): on `/<app>/sign-in`, if the client SDK already has a user, POST its ID token to
+  `/auth/session` and go to `?next=` (kept inside the app), showing "Signing you in…" instead of the
+  form. A 30-second guard stops retry loops. Sign-out redirects to `/sign-in?signedout=1`, which also
+  signs the browser out of Firebase (the whole suite), so it can't silently sign back in.
+- **Travel:** with no handoff and no Travel user, copy the launcher's user into Travel's named app
+  (`updateCurrentUser`, `getSuiteAuth()` in `lib/sync/client.ts`). Travel sign-out signs the suite out too.
+- The server checks are unchanged: `/auth/session` still verifies the token (signature + revocation),
+  and Firestore rules / proxy `ALLOWED_UIDS` still gate every read and write.
+- **Not covered:** Money keeps its own password + 2-step sign-in; Siddur has no sign-in.
+
 ### 3d. In-app agent — REQUIRED (each app gets its own agent)
 In your root layout, mount the shared component scoped to your app:
 - **Cookie apps:** add `GET /api/agent-token` (reads `__session` cookie → `adminAuth().createCustomToken(uid)`
