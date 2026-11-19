@@ -84,3 +84,14 @@ describe("importInput", () => {
     expect(r.ok && r.item.finishedAt).toBe("2026-11-16");
   });
 });
+
+describe("pickMatch for books", () => {
+  const night = (creator: string | null, id = "1") => entry({ type: "book", title: "Night", year: 1958, creator, ref: { source: "openlibrary", id, type: "book" } });
+  it("requires the author's surname when the row has one", () => {
+    expect(pickMatch({ title: "Night", creator: "Elie Wiesel" }, [night("Someone Else"), night("Elie Wiesel", "2")])?.ref.id).toBe("2");
+    expect(pickMatch({ title: "Night", creator: "Elie Wiesel" }, [night("Someone Else")])).toBeNull();
+  });
+  it("handles several authors", () => {
+    expect(pickMatch({ title: "Night", creator: "Ezra Klein & Joe Posner" }, [night("Joe Posner")])).not.toBeNull();
+  });
+});

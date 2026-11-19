@@ -59,15 +59,28 @@ export function parseImport(text: string): { ok: true; rows: ImportRow[] } | { o
 const norm = (s: string) =>
   s.toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, " ").replace(/^(the|a|an) /, "").trim();
 
+/** Last word of each name ("Henry David Thoreau" → "thoreau"). */
+const surnames = (creator: string) =>
+  creator.split(/,|&| and /).map((n) => norm(n).split(" ").pop() ?? "").filter((x) => x.length > 1);
+
 /**
  * Best search result for a row. With a year, only a result within a year of
  * it counts (Heat 1995, not Heat 1986); an exact title beats a partial one.
- * No acceptable result → null, and the row is added as typed.
+ * For a book with a known author, the result's author must share a surname
+ * (so "Night" by Elie Wiesel can't land on someone else's "Night").
+ * No acceptable result → null, and the row is added / left as typed.
  */
-export function pickMatch(row: Pick<ImportRow, "title" | "year">, results: CatalogEntry[]): CatalogEntry | null {
+export function pickMatch(row: Pick<ImportRow, "title" | "year"> & { creator?: string | null }, results: CatalogEntry[]): CatalogEntry | null {
   const t = norm(row.title);
   const yearOk = (e: CatalogEntry) => !row.year || !e.year || Math.abs(e.year - row.year) <= 1;
-  const candidates = results.filter(yearOk);
+  const want = row.creator ? surnames(row.creator) : [];
+  const authorOk = (e: CatalogEntry) => {
+    if (e.type !== "book" || !want.length) return true;
+    if (!e.creator) return false;
+    const got = surnames(e.creator);
+    return want.some((w) => got.includes(w));
+  };
+  const candidates = results.filter((e) => yearOk(e) && authorOk(e));
   return (
     candidates.find((e) => norm(e.title) === t && e.year === row.year) ??
     candidates.find((e) => norm(e.title) === t) ??

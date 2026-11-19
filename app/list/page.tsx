@@ -59,6 +59,7 @@ export default async function ListPage({ searchParams }: { searchParams: Promise
     })
     .sort(sortFor(status));
   const cur: Search = { status, type, q: sp.q };
+  const unmatched = all.filter((i) => !Object.keys(i.externalIds).length).length;
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
@@ -68,6 +69,13 @@ export default async function ListPage({ searchParams }: { searchParams: Promise
           + Add a title
         </Link>
       </div>
+
+      {unmatched > 0 && (
+        <p className="mb-4 text-sm text-secondary">
+          {unmatched} {unmatched === 1 ? "item has" : "items have"} no cover or details yet.{" "}
+          <Link href="/match" className="text-accent hover:underline">Find covers</Link>
+        </p>
+      )}
 
       <div className="mb-4 flex flex-wrap gap-2" role="tablist">
         {TAB_ORDER.map((s) => (

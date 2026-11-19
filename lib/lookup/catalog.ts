@@ -70,13 +70,23 @@ const names = (v: unknown): string[] => arr(v).map((x) => s(x.name)).filter((x):
 export const stripHtml = (h: unknown): string | null =>
   s(String(h ?? "").replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/\s+/g, " "));
 
+/** Open Library is often slow (several seconds) from Vercel: give it longer, and one retry. */
+const SLOW_HOSTS = ["https://openlibrary.org/"];
+const SLOW_TIMEOUT_MS = 15000;
+
 async function getJson(url: string, fetchImpl: Fetch, headers: Record<string, string> = {}): Promise<unknown> {
-  let res: Response;
-  try {
-    res = await fetchImpl(url, { headers: { Accept: "application/json", ...headers }, signal: AbortSignal.timeout(TIMEOUT_MS) });
-  } catch {
-    throw new LookupError("The title search didn't answer. Try again in a moment.");
+  const slow = SLOW_HOSTS.some((h) => url.startsWith(h));
+  const attempts = slow ? 2 : 1;
+  let res: Response | null = null;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      res = await fetchImpl(url, { headers: { Accept: "application/json", ...headers }, signal: AbortSignal.timeout(slow ? SLOW_TIMEOUT_MS : TIMEOUT_MS) });
+      if (res.status < 500) break;
+    } catch {
+      res = null;
+    }
   }
+  if (!res) throw new LookupError("The title search didn't answer. Try again in a moment.");
   if (res.status === 401) throw new LookupError("The movie database key isn't valid. Check TMDB_API_KEY on Vercel.");
   if (!res.ok) throw new LookupError(`The title search failed (HTTP ${res.status}).`);
   return res.json();
