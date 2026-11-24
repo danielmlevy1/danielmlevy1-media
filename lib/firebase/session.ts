@@ -58,24 +58,33 @@ export async function createSessionFromIdToken(idToken: string): Promise<void> {
  * Pass `checkRevoked: true` to also catch sign-outs from other devices,
  * at the cost of an extra round-trip to Firebase Auth on every request.
  */
+/**
+ * The suite-wide sign-in cookie, set by the launcher for every app on
+ * www.daniellevy.app (Path=/, see LAUNCHER-INTEGRATION.md §3c). Accepted
+ * alongside this app's own `__session`, so the app opens signed in without a
+ * sign-in page. Same Firebase project, so the same verification applies.
+ */
+export const SUITE_SESSION_COOKIE = "__suite";
+
 export async function getCurrentUser(checkRevoked = false): Promise<{
   uid: string;
   email: string | null;
 } | null> {
   const store = await cookies();
-  const cookieValue = store.get(FIREBASE_SESSION_COOKIE)?.value;
-  if (!cookieValue) return null;
-
-  try {
-    const decoded = await adminAuth().verifySessionCookie(
-      cookieValue,
-      checkRevoked,
-    );
-    return { uid: decoded.uid, email: decoded.email ?? null };
-  } catch {
-    // Expired / invalid / revoked — caller should treat as signed out.
-    return null;
+  for (const name of [FIREBASE_SESSION_COOKIE, SUITE_SESSION_COOKIE]) {
+    const cookieValue = store.get(name)?.value;
+    if (!cookieValue) continue;
+    try {
+      const decoded = await adminAuth().verifySessionCookie(
+        cookieValue,
+        checkRevoked,
+      );
+      return { uid: decoded.uid, email: decoded.email ?? null };
+    } catch {
+      // Expired / invalid / revoked — try the other cookie, else signed out.
+    }
   }
+  return null;
 }
 
 /** Clear the session cookie (sign-out). */
@@ -84,4 +93,6 @@ export async function clearSession(): Promise<void> {
   // Must match the path the cookie was set with (/media) or the delete
   // silently no-ops and sign-out doesn't clear the session.
   store.delete({ name: FIREBASE_SESSION_COOKIE, path: "/media" });
+  // Sign-out signs out of the whole suite (the launcher's shared cookie too).
+  store.set(SUITE_SESSION_COOKIE, "", { path: "/", maxAge: 0 });
 }

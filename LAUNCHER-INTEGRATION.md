@@ -78,19 +78,26 @@ server, stripped immediately on arrival). Your app catches it on load:
 - **Travel:** `AuthHandoff` exchanges the token via the proxy's `/api/custom-token`, then
   `signInWithCustomToken` client-side.
 
-**One sign-in (2026-11):** the tile handoff alone left gaps (bookmarks, direct links, the side bar
-inside an app, expired 5-day cookies all showed a second sign-in). Every app is same-origin on
-`www.daniellevy.app` and uses the same Firebase project, so the launcher's Firebase sign-in is already
-stored in the browser (IndexedDB, default app). `AuthHandoff` now also uses it:
-- **Cookie apps** (Recipes, Tax, Insurance, Holdings, Media — identical `app/_components/auth-handoff.tsx`,
-  keep them in sync): on `/<app>/sign-in`, if the client SDK already has a user, POST its ID token to
-  `/auth/session` and go to `?next=` (kept inside the app), showing "Signing you in…" instead of the
-  form. A 30-second guard stops retry loops. Sign-out redirects to `/sign-in?signedout=1`, which also
-  signs the browser out of Firebase (the whole suite), so it can't silently sign back in.
-- **Travel:** with no handoff and no Travel user, copy the launcher's user into Travel's named app
-  (`updateCurrentUser`, `getSuiteAuth()` in `lib/sync/client.ts`). Travel sign-out signs the suite out too.
-- The server checks are unchanged: `/auth/session` still verifies the token (signature + revocation),
-  and Firestore rules / proxy `ALLOWED_UIDS` still gate every read and write.
+**One sign-in (2026-11):** the launcher keeps a site-wide `__suite` cookie (Firebase session cookie,
+14 days, `Path=/`, HttpOnly) on `www.daniellevy.app`, so every cookie app opens signed in with no
+sign-in page in between:
+- **Minting:** the launcher POSTs its ID token to `/auth/suite` (rewrite → proxy
+  `api/suite-session.js`, which checks ALLOWED_UIDS and refuses restricted accounts and other sites)
+  on load every ~6 hours; `DELETE /auth/suite` on sign-out.
+- **Cookie apps** (Recipes, Tax, Insurance, Media, Holdings): `middleware.ts` accepts `__session` OR
+  `__suite`; `getCurrentUser()` verifies whichever is present (same project, same check);
+  `clearSession()` also clears `__suite`, so signing out of any app signs out of the suite.
+- **`/sign-in` is a fallback, not a step** (`app/_components/auth-handoff.tsx`, identical across cookie
+  apps, keep in sync): it shows only "Signing you in…" and uses the launcher hand-off token or the
+  browser's Firebase sign-in to start a session; if the browser isn't signed in at all it sends you to
+  the launcher (`/?next=<path>`), which brings you back after you sign in. The app's own form appears
+  only if that fails twice within 30 s. On normal pages a launcher `#__aht=` token is stripped and
+  ignored (no re-sign-in, no reload). `/sign-in?signedout=1` signs the browser out and returns to the launcher.
+- **Travel:** with no Travel user, copies the launcher's user into Travel's named app
+  (`updateCurrentUser`, `getSuiteAuth()` in `lib/sync/client.ts`); a tile token is ignored when already
+  signed in. Travel sign-out signs the suite out too.
+- Server checks are unchanged: tokens and cookies are verified by the Admin SDK, and Firestore rules /
+  proxy `ALLOWED_UIDS` still gate every read and write.
 - **Not covered:** Money keeps its own password + 2-step sign-in; Siddur has no sign-in.
 
 ### 3d. In-app agent — REQUIRED (each app gets its own agent)

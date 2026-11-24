@@ -44,7 +44,10 @@ export function middleware(request: NextRequest) {
   }
 
   // Everything else needs a session cookie. If none, bounce to /sign-in.
-  const cookie = request.cookies.get(FIREBASE_SESSION_COOKIE)?.value;
+  // This app's own cookie, or the suite-wide one the launcher sets (Path=/).
+  const cookie =
+    request.cookies.get(FIREBASE_SESSION_COOKIE)?.value ??
+    request.cookies.get("__suite")?.value;
   if (!cookie) {
     const url = request.nextUrl.clone();
     url.pathname = "/sign-in";
