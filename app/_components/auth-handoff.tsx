@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { onAuthStateChanged, signOut } from "firebase/auth";
+import { onAuthStateChanged, signOut, type User } from "firebase/auth";
 import { firebaseAuth } from "@/lib/firebase/client";
 import { api } from "@/lib/base-path";
 
@@ -9,24 +9,21 @@ import { api } from "@/lib/base-path";
  * One sign-in for the whole suite (same file in every cookie app; keep them
  * in sync — see LAUNCHER-INTEGRATION.md §3c).
  *
- * Every app is served from the same origin (www.daniellevy.app/<app>) and uses
- * the same Firebase project, so the launcher's Firebase sign-in is already
- * stored in this browser. This component turns it into this app's
- * `__session` cookie so you never see a second sign-in screen:
+ * Normally you never get here: the launcher keeps a site-wide `__suite`
+ * cookie that this app accepts (lib/firebase/session.ts, middleware.ts), so
+ * pages open signed in. This component only covers the edges:
  *
- * 1. Handoff: a launcher tile opens the app with #__aht=<ID token>. Strip it
- *    (before any await) and exchange it for the session cookie.
- * 2. Silent sign-in: on the sign-in page (bookmark, direct link, expired
- *    cookie, switching apps from the side bar), if this browser is already
- *    signed in to the suite, use that sign-in instead of showing the form.
- *    The server still verifies the token exactly
- *    as for a typed sign-in; this only skips the form.
- * 3. Sign-out: the app's sign-out lands on /sign-in?signedout=1, which also
- *    signs this browser out of the suite, so step 2 can't sign you straight
- *    back in.
+ * - On any normal page: a leftover launcher #__aht= token is stripped from
+ *   the URL and ignored (the page loaded, so you're already signed in).
+ * - On /sign-in (no valid cookie): use the launcher's hand-off token or this
+ *   browser's suite sign-in to start a session and continue, showing only
+ *   "Signing you in…". If this browser isn't signed in at all, go to the
+ *   launcher to sign in (?next= brings you back). The app's own form shows
+ *   only if that fails twice within 30 seconds.
+ * - /sign-in?signedout=1 (the app's sign-out): sign the browser out of the
+ *   suite and return to the launcher.
  *
- * A failed attempt falls back to the normal form, and a 30-second guard stops
- * a retry loop if the server keeps refusing the session.
+ * The server still verifies every token exactly as for a typed sign-in.
  */
 
 const BASE = api("/").replace(/\/$/, "");
@@ -36,8 +33,8 @@ const GUARD_MS = 30_000;
 /** Where to go after sign-in: the ?next= path, kept inside this app. */
 function destination(): string {
   const next = new URLSearchParams(window.location.search).get("next") || "/";
-  // Only same-app paths ("/x"), never "//host" or a full URL.
-  if (!next.startsWith("/") || next.startsWith("//")) return BASE;
+  // Only same-app paths ("/x"), never "//host", "/\host" or a full URL.
+  if (!next.startsWith("/") || next.startsWith("//") || next.includes("\\")) return BASE;
   if (next === "/") return BASE;
   // `next` is basePath-less; api("/") = "/<app>/" (trailing slash) 404s under
   // the launcher rewrite, so root goes to BASE.
@@ -45,6 +42,11 @@ function destination(): string {
 }
 
 async function startSession(idToken: string): Promise<boolean> {
+  // Refresh the launcher's suite-wide cookie too, so the next app opens
+  // straight in. Best-effort: this app's own cookie is what we wait for.
+  fetch("/auth/suite", { method: "POST", headers: { Authorization: "Bearer " + idToken } })
+    .then((r) => r.ok && localStorage.setItem("suite-session-at", String(Date.now())))
+    .catch(() => {});
   const res = await fetch(api("/auth/session"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -53,21 +55,25 @@ async function startSession(idToken: string): Promise<boolean> {
   return res.ok;
 }
 
-function recentlyTried(): boolean {
+/** True if we already tried within 30s (stops a loop if something keeps refusing). */
+function triedRecently(): boolean {
   try {
     const at = Number(sessionStorage.getItem(GUARD_KEY) || 0);
-    return Date.now() - at < GUARD_MS;
-  } catch {
-    return false;
-  }
-}
-
-function markTried(): void {
-  try {
+    if (Date.now() - at < GUARD_MS) return true;
     sessionStorage.setItem(GUARD_KEY, String(Date.now()));
   } catch {
     /* storage blocked: the guard is best-effort */
   }
+  return false;
+}
+
+function currentUser(): Promise<User | null> {
+  return new Promise((resolve) => {
+    const unsub = onAuthStateChanged(firebaseAuth, (u) => {
+      unsub();
+      resolve(u);
+    });
+  });
 }
 
 export default function AuthHandoff() {
@@ -75,53 +81,48 @@ export default function AuthHandoff() {
 
   useEffect(() => {
     let cancelled = false;
-    const done = () => !cancelled && setBusy(false);
-
-    // 1. Handoff from a launcher tile.
     const m = window.location.hash.match(/(?:^|[#&])__aht=([^&]+)/);
-    if (m) {
-      const idToken = decodeURIComponent(m[1]);
-      window.history.replaceState(null, "", window.location.pathname + window.location.search);
-      setBusy(true);
-      startSession(idToken)
-        .then((ok) => (ok ? window.location.replace(destination()) : done()))
-        .catch(done);
-      return () => {
-        cancelled = true;
-      };
-    }
+    if (m) window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    const handoff = m ? decodeURIComponent(m[1]) : null;
 
-    const onSignInPage = window.location.pathname === BASE + "/sign-in";
-    if (!onSignInPage) {
+    if (window.location.pathname !== BASE + "/sign-in") {
       return;
     }
 
-    // 3. Signed out on purpose: sign the whole browser out of the suite.
-    if (new URLSearchParams(window.location.search).has("signedout")) {
-      signOut(firebaseAuth).catch(() => {});
-      return;
-    }
-
-    // 2. Silent sign-in from the suite's existing sign-in.
-    if (recentlyTried()) return;
+    const params = new URLSearchParams(window.location.search);
     setBusy(true);
-    const unsub = onAuthStateChanged(firebaseAuth, async (user) => {
-      unsub();
-      if (!user) return done();
-      markTried();
+    (async () => {
+      // Signed out on purpose: sign the whole browser out, back to the launcher.
+      if (params.has("signedout")) {
+        try {
+          localStorage.removeItem("suite-session-at");
+          await signOut(firebaseAuth);
+        } catch {
+          /* still leave */
+        }
+        window.location.replace("/");
+        return;
+      }
+      if (triedRecently()) return !cancelled && setBusy(false);
       try {
-        if (await startSession(await user.getIdToken())) {
+        const user = handoff ? null : await currentUser();
+        const token = handoff ?? (user ? await user.getIdToken() : null);
+        if (!token) {
+          // Not signed in anywhere: sign in once on the launcher, then come back.
+          window.location.replace("/?next=" + encodeURIComponent(destination()));
+          return;
+        }
+        if (await startSession(token)) {
           window.location.replace(destination());
           return;
         }
       } catch {
         /* fall back to the form */
       }
-      done();
-    });
+      if (!cancelled) setBusy(false);
+    })();
     return () => {
       cancelled = true;
-      unsub();
     };
   }, []);
 
